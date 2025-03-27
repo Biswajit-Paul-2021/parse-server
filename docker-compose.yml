@@ -1,11 +1,19 @@
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: parse-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
   postgres:
-    image: postgis/postgis:16-3.4 # Specific version with PostGIS 3.4
+    image: postgis/postgis:16-3.4
     environment:
-      - POSTGRES_USER=parse_admin # Changed from default 'postgres'
+      - POSTGRES_USER=parse_admin
       - POSTGRES_PASSWORD=password123
       - POSTGRES_DB=parse_prod
-      - POSTGRES_MULTIPLE_EXTENSIONS=postgis,hstore,postgis_topology,postgis_raster,pgrouting
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U parse_admin -d parse_prod"]
       interval: 5s
@@ -14,16 +22,19 @@ services:
     volumes:
       - postgis-data:/var/lib/postgresql/data
 
-  parse:
+  parse-server:
     image: parseplatform/parse-server:5.4.0
     environment:
       - PARSE_SERVER_APPLICATION_ID=myAppId
       - PARSE_SERVER_MASTER_KEY=myMasterKey123!
       - PARSE_SERVER_DATABASE_URI=postgres://parse_admin:password123@postgres:5432/parse_prod
+      - PARSE_SERVER_URL=http://parse-server:1337/parse
       - PARSE_SERVER_MOUNT_PATH=/parse
       - PARSE_SERVER_CLOUD=/home/parse/cloud/main.js
-      - PARSE_SERVER_START_WAIT_TIMEOUT=30000
-      - PARSE_SERVER_URL=http://parse:1337/parse
+      # LiveQuery Configuration
+      - PARSE_SERVER_LIVE_QUERY={"classNames":["Posts","Comments"]} # Classes to enable LiveQuery
+      - PARSE_SERVER_LIVE_QUERY_REDIS_URL=redis://redis:6379
+      - PARSE_SERVER_START_LIVE_QUERY_SERVER=true
     ports:
       - "1337:1337"
     volumes:
@@ -31,9 +42,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_started
 
   parse-dashboard:
     image: parseplatform/parse-dashboard:5.0.0
+    ports:
+      - "4040:4040"
     environment:
       - PARSE_DASHBOARD_ALLOW_INSECURE_HTTP=1
       - PARSE_DASHBOARD_SERVER_URL=http://localhost:1337/parse
@@ -42,12 +57,9 @@ services:
       - PARSE_DASHBOARD_APP_NAME=MyParseApp
       - PARSE_DASHBOARD_USER_ID=admin
       - PARSE_DASHBOARD_USER_PASSWORD=admin123
-    ports:
-      - "4040:4040"
-    volumes:
-      - ./dashboard-config:/home/parse-dashboard
     depends_on:
-      - parse
+      - parse-server
 
 volumes:
   postgis-data:
+  redis_data:
